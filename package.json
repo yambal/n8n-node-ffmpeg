@@ -1,0 +1,42 @@
+{
+  "name": "@jnymmt/n8n-nodes-ffmpeg",
+  "version": "0.1.0",
+  "description": "n8n community node for audio conversion using FFmpeg",
+  "keywords": [
+    "n8n-community-node-package"
+  ],
+  "license": "MIT",
+  "author": {
+    "name": "yambal"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yambal/n8n-node-ffmpeg.git"
+  },
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc && gulp build:icons",
+    "dev": "tsc --watch",
+    "lint": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "files": [
+    "dist"
+  ],
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "credentials": [],
+    "nodes": [
+      "dist/nodes/Ffmpeg/Ffmpeg.node.js"
+    ]
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "gulp": "^5.0.0",
+    "n8n-workflow": "^1.0.0",
+    "typescript": "^5.7.0"
+  },
+  "peerDependencies": {
+    "n8n-workflow": "*"
+  }
+}
