@@ -31,7 +31,7 @@ export class Ffmpeg implements INodeType {
 		group: ['transform'],
 		version: 1,
 		subtitle: '={{$parameter["operation"]}}',
-		description: 'Convert audio files using FFmpeg',
+		description: 'Process audio files using FFmpeg',
 		defaults: {
 			name: 'FFmpeg',
 		},
@@ -55,6 +55,12 @@ export class Ffmpeg implements INodeType {
 						value: 'changeBitrate',
 						description: 'Change audio bitrate',
 						action: 'Change audio bitrate',
+					},
+					{
+						name: 'Mix Narration with BGM',
+						value: 'mixNarrationBgm',
+						description: 'Mix narration audio with background music',
+						action: 'Mix narration with BGM',
 					},
 				],
 				default: 'convert',
@@ -147,6 +153,104 @@ export class Ffmpeg implements INodeType {
 					},
 				],
 			},
+			// Mix Narration with BGM parameters
+			{
+				displayName: 'BGM Binary Property',
+				name: 'bgmBinaryPropertyName',
+				type: 'string',
+				default: 'bgm',
+				description: 'Name of the binary property containing the BGM audio file',
+				displayOptions: {
+					show: {
+						operation: ['mixNarrationBgm'],
+					},
+				},
+			},
+			{
+				displayName: 'Fade In Duration (seconds)',
+				name: 'fadeInSeconds',
+				type: 'number',
+				typeOptions: { minValue: 0, numberStepSize: 0.5 },
+				default: 2,
+				description: 'Duration for BGM to fade in from silence to full volume',
+				displayOptions: {
+					show: {
+						operation: ['mixNarrationBgm'],
+					},
+				},
+			},
+			{
+				displayName: 'Intro Duration (seconds)',
+				name: 'introSeconds',
+				type: 'number',
+				typeOptions: { minValue: 0, numberStepSize: 0.5 },
+				default: 3,
+				description: 'Duration of BGM at full volume (after fade in, before fade down)',
+				displayOptions: {
+					show: {
+						operation: ['mixNarrationBgm'],
+					},
+				},
+			},
+			{
+				displayName: 'Fade Down Duration (seconds)',
+				name: 'fadeDownSeconds',
+				type: 'number',
+				typeOptions: { minValue: 0, numberStepSize: 0.5 },
+				default: 2,
+				description: 'Duration for BGM to fade from full volume to BGM volume',
+				displayOptions: {
+					show: {
+						operation: ['mixNarrationBgm'],
+					},
+				},
+			},
+			{
+				displayName: 'BGM Volume',
+				name: 'bgmVolume',
+				type: 'number',
+				typeOptions: { minValue: 0, maxValue: 1, numberStepSize: 0.05 },
+				default: 0.15,
+				description: 'BGM volume during narration (0.0 to 1.0)',
+				displayOptions: {
+					show: {
+						operation: ['mixNarrationBgm'],
+					},
+				},
+			},
+			{
+				displayName: 'Fade Out Duration (seconds)',
+				name: 'fadeOutSeconds',
+				type: 'number',
+				typeOptions: { minValue: 0, numberStepSize: 0.5 },
+				default: 3,
+				description: 'Duration for BGM to fade out to silence after narration ends',
+				displayOptions: {
+					show: {
+						operation: ['mixNarrationBgm'],
+					},
+				},
+			},
+			{
+				displayName: 'Mix Output Format',
+				name: 'mixOutputFormat',
+				type: 'options',
+				options: [
+					{ name: 'MP3', value: 'mp3' },
+					{ name: 'WAV', value: 'wav' },
+					{ name: 'OGG', value: 'ogg' },
+					{ name: 'FLAC', value: 'flac' },
+					{ name: 'AAC', value: 'aac' },
+					{ name: 'M4A', value: 'm4a' },
+				],
+				default: 'mp3',
+				description: 'Output audio format',
+				displayOptions: {
+					show: {
+						operation: ['mixNarrationBgm'],
+					},
+				},
+			},
 			{
 				displayName: 'Output Binary Property',
 				name: 'outputBinaryPropertyName',
@@ -165,6 +269,147 @@ export class Ffmpeg implements INodeType {
 			const operation = this.getNodeParameter('operation', i) as string;
 			const binaryPropertyName = this.getNodeParameter('binaryPropertyName', i) as string;
 			const outputBinaryPropertyName = this.getNodeParameter('outputBinaryPropertyName', i) as string;
+
+			// Handle Mix Narration with BGM separately
+			if (operation === 'mixNarrationBgm') {
+				const bgmBinaryPropertyName = this.getNodeParameter('bgmBinaryPropertyName', i) as string;
+				const fadeInSeconds = this.getNodeParameter('fadeInSeconds', i) as number;
+				const introSeconds = this.getNodeParameter('introSeconds', i) as number;
+				const fadeDownSeconds = this.getNodeParameter('fadeDownSeconds', i) as number;
+				const bgmVolume = this.getNodeParameter('bgmVolume', i) as number;
+				const fadeOutSeconds = this.getNodeParameter('fadeOutSeconds', i) as number;
+				const mixOutputFormat = this.getNodeParameter('mixOutputFormat', i) as string;
+
+				// Get narration binary
+				const narBinaryData = this.helpers.assertBinaryData(i, binaryPropertyName);
+				const narBuffer = await this.helpers.getBinaryDataBuffer(i, binaryPropertyName);
+				const narExt = getExtensionFromBinary(narBinaryData);
+
+				// Get BGM binary
+				const bgmBinaryData = this.helpers.assertBinaryData(i, bgmBinaryPropertyName);
+				const bgmBuffer = await this.helpers.getBinaryDataBuffer(i, bgmBinaryPropertyName);
+				const bgmExt = getExtensionFromBinary(bgmBinaryData);
+
+				const id = randomUUID();
+				const narPath = join(tmpdir(), `ffmpeg_nar_${id}.${narExt}`);
+				const bgmPath = join(tmpdir(), `ffmpeg_bgm_${id}.${bgmExt}`);
+				const outputPath = join(tmpdir(), `ffmpeg_out_${id}.${mixOutputFormat}`);
+
+				try {
+					await writeFile(narPath, narBuffer);
+					await writeFile(bgmPath, bgmBuffer);
+
+					// Get narration duration using ffprobe
+					let narDuration: number;
+					try {
+						const probeResult = await execFileAsync('ffprobe', [
+							'-v', 'error',
+							'-show_entries', 'format=duration',
+							'-of', 'default=noprint_wrappers=1:nokey=1',
+							narPath,
+						]);
+						narDuration = parseFloat(probeResult.stdout.trim());
+					} catch (err: any) {
+						throw new NodeOperationError(
+							this.getNode(),
+							`ffprobe failed: ${err.stderr || err.message}`,
+							{ itemIndex: i },
+						);
+					}
+
+					// Calculate timing
+					// fadeIn -> intro (full vol) -> fadeDown -> narration + bgmVol -> fadeOut
+					const fadeInEnd = fadeInSeconds;
+					const introEnd = fadeInEnd + introSeconds;
+					const fadeDownEnd = introEnd + fadeDownSeconds;
+					const narDelay = fadeDownEnd;
+					const narEnd = narDelay + narDuration;
+					const totalDuration = narEnd + fadeOutSeconds;
+					const delayMs = Math.round(narDelay * 1000);
+
+					// Build volume expression for BGM envelope (inside-out):
+					// 0 ~ fadeInEnd: fade from 0 to 1.0
+					// fadeInEnd ~ introEnd: full volume (1.0)
+					// introEnd ~ fadeDownEnd: fade from 1.0 to bgmVolume
+					// fadeDownEnd ~ narEnd: bgmVolume
+					// narEnd ~ narEnd+fadeOutSeconds: fade from bgmVolume to 0
+					let volExpr = '0';
+					if (fadeOutSeconds > 0) {
+						volExpr = `if(lt(t,${narEnd + fadeOutSeconds}),${bgmVolume}*(1-(t-${narEnd})/${fadeOutSeconds}),${volExpr})`;
+					}
+					volExpr = `if(lt(t,${narEnd}),${bgmVolume},${volExpr})`;
+					if (fadeDownSeconds > 0) {
+						volExpr = `if(lt(t,${fadeDownEnd}),1.0-(1.0-${bgmVolume})*(t-${introEnd})/${fadeDownSeconds},${volExpr})`;
+					}
+					volExpr = `if(lt(t,${introEnd}),1.0,${volExpr})`;
+					if (fadeInSeconds > 0) {
+						volExpr = `if(lt(t,${fadeInEnd}),t/${fadeInSeconds},${volExpr})`;
+					}
+
+					// Build filter_complex
+					const filterComplex =
+						`[0:a]adelay=${delayMs}:all=1[nar];` +
+						`[1:a]atrim=0:${totalDuration},asetpts=PTS-STARTPTS,volume='${volExpr}':eval=frame[bgm];` +
+						`[nar][bgm]amix=inputs=2:duration=longest:normalize=0[out]`;
+
+					const args = [
+						'-i', narPath,
+						'-stream_loop', '-1',
+						'-i', bgmPath,
+						'-filter_complex', filterComplex,
+						'-map', '[out]',
+						'-y', outputPath,
+					];
+
+					try {
+						await execFileAsync('ffmpeg', args, { timeout: 300_000 });
+					} catch (err: any) {
+						throw new NodeOperationError(
+							this.getNode(),
+							`FFmpeg failed: ${err.stderr || err.message}`,
+							{ itemIndex: i },
+						);
+					}
+
+					const outputBuffer = await readFile(outputPath);
+					const mimeType = MIME_TYPES[mixOutputFormat] || 'application/octet-stream';
+					const fileName = replaceExtension(
+						narBinaryData.fileName || 'mixed_audio',
+						mixOutputFormat,
+					);
+
+					const outputBinary = await this.helpers.prepareBinaryData(
+						outputBuffer,
+						fileName,
+						mimeType,
+					);
+
+					returnData.push({
+						json: {
+							operation,
+							narrationDuration: narDuration,
+							fadeInSeconds,
+							introSeconds,
+							fadeDownSeconds,
+							bgmVolume,
+							fadeOutSeconds,
+							totalDuration,
+							outputFormat: mixOutputFormat,
+							outputSize: outputBuffer.length,
+						},
+						binary: {
+							[outputBinaryPropertyName]: outputBinary,
+						},
+						pairedItem: { item: i },
+					});
+				} finally {
+					await unlink(narPath).catch(() => {});
+					await unlink(bgmPath).catch(() => {});
+					await unlink(outputPath).catch(() => {});
+				}
+
+				continue;
+			}
 
 			// Validate binary data exists
 			const binaryData = this.helpers.assertBinaryData(i, binaryPropertyName);
