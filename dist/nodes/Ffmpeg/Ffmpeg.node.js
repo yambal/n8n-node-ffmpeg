@@ -247,6 +247,26 @@ class Ffmpeg {
                     },
                 },
                 {
+                    displayName: 'Mix Output Bitrate',
+                    name: 'mixBitrate',
+                    type: 'options',
+                    options: [
+                        { name: 'Auto', value: '' },
+                        { name: '64 kbps', value: '64k' },
+                        { name: '128 kbps', value: '128k' },
+                        { name: '192 kbps', value: '192k' },
+                        { name: '256 kbps', value: '256k' },
+                        { name: '320 kbps', value: '320k' },
+                    ],
+                    default: '',
+                    description: 'Output audio bitrate (leave auto for default)',
+                    displayOptions: {
+                        show: {
+                            operation: ['mixNarrationBgm'],
+                        },
+                    },
+                },
+                {
                     displayName: 'Output Binary Property',
                     name: 'outputBinaryPropertyName',
                     type: 'string',
@@ -272,6 +292,7 @@ class Ffmpeg {
                 const bgmVolume = this.getNodeParameter('bgmVolume', i);
                 const fadeOutSeconds = this.getNodeParameter('fadeOutSeconds', i);
                 const mixOutputFormat = this.getNodeParameter('mixOutputFormat', i);
+                const mixBitrate = this.getNodeParameter('mixBitrate', i);
                 // Get narration binary
                 const narBinaryData = this.helpers.assertBinaryData(i, binaryPropertyName);
                 const narBuffer = await this.helpers.getBinaryDataBuffer(i, binaryPropertyName);
@@ -338,8 +359,11 @@ class Ffmpeg {
                         '-i', bgmPath,
                         '-filter_complex', filterComplex,
                         '-map', '[out]',
-                        '-y', outputPath,
                     ];
+                    if (mixBitrate) {
+                        args.push('-b:a', mixBitrate);
+                    }
+                    args.push('-y', outputPath);
                     try {
                         await execFileAsync('ffmpeg', args, { timeout: 300000 });
                     }
