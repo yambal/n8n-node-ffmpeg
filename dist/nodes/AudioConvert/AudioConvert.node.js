@@ -96,6 +96,17 @@ class AudioConvert {
                     description: 'Number of audio channels',
                 },
                 {
+                    displayName: 'Normalize',
+                    name: 'normalize',
+                    type: 'options',
+                    options: [
+                        { name: 'Off', value: '' },
+                        { name: 'EBU R128 Loudness', value: 'loudnorm' },
+                    ],
+                    default: '',
+                    description: 'Audio loudness normalization',
+                },
+                {
                     displayName: 'Output Binary Property',
                     name: 'outputBinaryPropertyName',
                     type: 'string',
@@ -115,6 +126,7 @@ class AudioConvert {
             const bitrate = this.getNodeParameter('bitrate', i);
             const sampleRate = this.getNodeParameter('sampleRate', i);
             const channels = this.getNodeParameter('channels', i);
+            const normalize = this.getNodeParameter('normalize', i);
             const binaryData = this.helpers.assertBinaryData(i, binaryPropertyName);
             const inputBuffer = await this.helpers.getBinaryDataBuffer(i, binaryPropertyName);
             const inputExt = getExtensionFromBinary(binaryData);
@@ -133,6 +145,9 @@ class AudioConvert {
                 }
                 if (channels) {
                     args.push('-ac', String(channels));
+                }
+                if (normalize) {
+                    args.push('-af', normalize);
                 }
                 args.push('-y', outputPath);
                 try {

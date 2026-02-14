@@ -272,6 +272,22 @@ export class Ffmpeg implements INodeType {
 				},
 			},
 			{
+				displayName: 'Normalize',
+				name: 'mixNormalize',
+				type: 'options',
+				options: [
+					{ name: 'Off', value: '' },
+					{ name: 'EBU R128 Loudness', value: 'loudnorm' },
+				],
+				default: '',
+				description: 'Audio loudness normalization on the mixed output',
+				displayOptions: {
+					show: {
+						operation: ['mixNarrationBgm'],
+					},
+				},
+			},
+			{
 				displayName: 'Output Binary Property',
 				name: 'outputBinaryPropertyName',
 				type: 'string',
@@ -300,6 +316,7 @@ export class Ffmpeg implements INodeType {
 				const fadeOutSeconds = this.getNodeParameter('fadeOutSeconds', i) as number;
 				const mixOutputFormat = this.getNodeParameter('mixOutputFormat', i) as string;
 				const mixBitrate = this.getNodeParameter('mixBitrate', i) as string;
+				const mixNormalize = this.getNodeParameter('mixNormalize', i) as string;
 
 				// Get narration binary
 				const narBinaryData = this.helpers.assertBinaryData(i, binaryPropertyName);
@@ -368,10 +385,13 @@ export class Ffmpeg implements INodeType {
 					}
 
 					// Build filter_complex
+					const mixChain = mixNormalize
+						? `[nar][bgm]amix=inputs=2:duration=longest:normalize=0,${mixNormalize}[out]`
+						: `[nar][bgm]amix=inputs=2:duration=longest:normalize=0[out]`;
 					const filterComplex =
 						`[0:a]adelay=${delayMs}:all=1[nar];` +
 						`[1:a]atrim=0:${totalDuration},asetpts=PTS-STARTPTS,volume='${volExpr}':eval=frame[bgm];` +
-						`[nar][bgm]amix=inputs=2:duration=longest:normalize=0[out]`;
+						mixChain;
 
 					const args = [
 						'-i', narPath,

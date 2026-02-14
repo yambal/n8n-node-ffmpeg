@@ -101,6 +101,17 @@ export class AudioConvert implements INodeType {
 				description: 'Number of audio channels',
 			},
 			{
+				displayName: 'Normalize',
+				name: 'normalize',
+				type: 'options',
+				options: [
+					{ name: 'Off', value: '' },
+					{ name: 'EBU R128 Loudness', value: 'loudnorm' },
+				],
+				default: '',
+				description: 'Audio loudness normalization',
+			},
+			{
 				displayName: 'Output Binary Property',
 				name: 'outputBinaryPropertyName',
 				type: 'string',
@@ -121,6 +132,7 @@ export class AudioConvert implements INodeType {
 			const bitrate = this.getNodeParameter('bitrate', i) as string;
 			const sampleRate = this.getNodeParameter('sampleRate', i) as number;
 			const channels = this.getNodeParameter('channels', i) as number;
+			const normalize = this.getNodeParameter('normalize', i) as string;
 
 			const binaryData = this.helpers.assertBinaryData(i, binaryPropertyName);
 			const inputBuffer = await this.helpers.getBinaryDataBuffer(i, binaryPropertyName);
@@ -144,6 +156,9 @@ export class AudioConvert implements INodeType {
 				}
 				if (channels) {
 					args.push('-ac', String(channels));
+				}
+				if (normalize) {
+					args.push('-af', normalize);
 				}
 
 				args.push('-y', outputPath);
