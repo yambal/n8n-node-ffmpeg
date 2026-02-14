@@ -156,6 +156,39 @@ export class Ffmpeg implements INodeType {
 				},
 			},
 			{
+				displayName: 'Echo',
+				name: 'acEcho',
+				type: 'options',
+				options: [
+					{ name: 'Off', value: '' },
+					{ name: 'Light', value: 'aecho=0.8:0.88:60:0.4' },
+					{ name: 'Medium', value: 'aecho=0.8:0.88:60|100:0.4|0.27' },
+					{ name: 'Heavy', value: 'aecho=0.8:0.9:100|200:0.4|0.27' },
+					{ name: 'Hall', value: 'aecho=0.8:0.9:1000:0.3' },
+					{ name: 'Custom', value: 'custom' },
+				],
+				default: '',
+				description: 'Add echo/reverb effect to audio',
+				displayOptions: {
+					show: {
+						operation: ['audioConvert'],
+					},
+				},
+			},
+			{
+				displayName: 'Echo Custom Value',
+				name: 'acEchoCustom',
+				type: 'string',
+				default: 'aecho=0.8:0.88:60:0.4',
+				description: 'Custom aecho filter value (e.g. aecho=in_gain:out_gain:delays:decays)',
+				displayOptions: {
+					show: {
+						operation: ['audioConvert'],
+						acEcho: ['custom'],
+					},
+				},
+			},
+			{
 				displayName: 'Normalize',
 				name: 'acNormalize',
 				type: 'options',
@@ -585,6 +618,7 @@ export class Ffmpeg implements INodeType {
 					const acBitrate = this.getNodeParameter('acBitrate', i) as string;
 					const acSampleRate = this.getNodeParameter('acSampleRate', i) as number;
 					const acChannels = this.getNodeParameter('acChannels', i) as number;
+					const acEcho = this.getNodeParameter('acEcho', i) as string;
 					const acNormalize = this.getNodeParameter('acNormalize', i) as string;
 					if (acBitrate) {
 						args.push('-b:a', acBitrate);
@@ -595,8 +629,19 @@ export class Ffmpeg implements INodeType {
 					if (acChannels) {
 						args.push('-ac', String(acChannels));
 					}
+					// Build audio filter chain
+					const filters: string[] = [];
+					if (acEcho) {
+						const echoValue = acEcho === 'custom'
+							? this.getNodeParameter('acEchoCustom', i) as string
+							: acEcho;
+						filters.push(echoValue);
+					}
 					if (acNormalize) {
-						args.push('-af', acNormalize);
+						filters.push(acNormalize);
+					}
+					if (filters.length > 0) {
+						args.push('-af', filters.join(','));
 					}
 				} else if (operation === 'convert') {
 					const options = this.getNodeParameter('options', i, {}) as {
