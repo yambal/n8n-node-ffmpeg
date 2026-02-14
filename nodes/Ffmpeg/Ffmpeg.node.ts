@@ -45,6 +45,12 @@ export class Ffmpeg implements INodeType {
 				noDataExpression: true,
 				options: [
 					{
+						name: 'Audio Convert',
+						value: 'audioConvert',
+						description: 'Convert format, bitrate, sample rate, channels, and normalize',
+						action: 'Audio convert',
+					},
+					{
 						name: 'Convert',
 						value: 'convert',
 						description: 'Convert audio to a different format',
@@ -63,7 +69,7 @@ export class Ffmpeg implements INodeType {
 						action: 'Mix narration with BGM',
 					},
 				],
-				default: 'convert',
+				default: 'audioConvert',
 			},
 			{
 				displayName: 'Binary Property',
@@ -72,6 +78,100 @@ export class Ffmpeg implements INodeType {
 				default: 'data',
 				description: 'Name of the binary property containing the input audio file',
 			},
+			// Audio Convert parameters
+			{
+				displayName: 'Output Format',
+				name: 'acOutputFormat',
+				type: 'options',
+				options: [
+					{ name: 'Keep Original', value: '' },
+					{ name: 'MP3', value: 'mp3' },
+					{ name: 'WAV', value: 'wav' },
+					{ name: 'OGG', value: 'ogg' },
+					{ name: 'FLAC', value: 'flac' },
+					{ name: 'AAC', value: 'aac' },
+					{ name: 'M4A', value: 'm4a' },
+				],
+				default: '',
+				description: 'Output audio format (keep original to preserve format)',
+				displayOptions: {
+					show: {
+						operation: ['audioConvert'],
+					},
+				},
+			},
+			{
+				displayName: 'Bitrate',
+				name: 'acBitrate',
+				type: 'options',
+				options: [
+					{ name: 'Auto', value: '' },
+					{ name: '64 kbps', value: '64k' },
+					{ name: '128 kbps', value: '128k' },
+					{ name: '192 kbps', value: '192k' },
+					{ name: '256 kbps', value: '256k' },
+					{ name: '320 kbps', value: '320k' },
+				],
+				default: '',
+				description: 'Audio bitrate',
+				displayOptions: {
+					show: {
+						operation: ['audioConvert'],
+					},
+				},
+			},
+			{
+				displayName: 'Sample Rate',
+				name: 'acSampleRate',
+				type: 'options',
+				options: [
+					{ name: 'Auto', value: 0 },
+					{ name: '22050 Hz', value: 22050 },
+					{ name: '44100 Hz', value: 44100 },
+					{ name: '48000 Hz', value: 48000 },
+				],
+				default: 0,
+				description: 'Audio sample rate',
+				displayOptions: {
+					show: {
+						operation: ['audioConvert'],
+					},
+				},
+			},
+			{
+				displayName: 'Channels',
+				name: 'acChannels',
+				type: 'options',
+				options: [
+					{ name: 'Auto', value: 0 },
+					{ name: 'Mono', value: 1 },
+					{ name: 'Stereo', value: 2 },
+				],
+				default: 0,
+				description: 'Number of audio channels',
+				displayOptions: {
+					show: {
+						operation: ['audioConvert'],
+					},
+				},
+			},
+			{
+				displayName: 'Normalize',
+				name: 'acNormalize',
+				type: 'options',
+				options: [
+					{ name: 'Off', value: '' },
+					{ name: 'EBU R128 Loudness', value: 'loudnorm' },
+				],
+				default: '',
+				description: 'Audio loudness normalization',
+				displayOptions: {
+					show: {
+						operation: ['audioConvert'],
+					},
+				},
+			},
+			// Convert parameters
 			{
 				displayName: 'Output Format',
 				name: 'outputFormat',
@@ -365,12 +465,7 @@ export class Ffmpeg implements INodeType {
 					const totalDuration = narEnd + fadeOutSeconds;
 					const delayMs = Math.round(narDelay * 1000);
 
-					// Build volume expression for BGM envelope (inside-out):
-					// 0 ~ fadeInEnd: fade from 0 to 1.0
-					// fadeInEnd ~ introEnd: full volume (1.0)
-					// introEnd ~ fadeDownEnd: fade from 1.0 to bgmVolume
-					// fadeDownEnd ~ narEnd: bgmVolume
-					// narEnd ~ narEnd+fadeOutSeconds: fade from bgmVolume to 0
+					// Build volume expression for BGM envelope (inside-out)
 					let volExpr = '0';
 					if (fadeOutSeconds > 0) {
 						volExpr = `if(lt(t,${narEnd + fadeOutSeconds}),${bgmVolume}*(1-(t-${narEnd})/${fadeOutSeconds}),${volExpr})`;
@@ -466,6 +561,9 @@ export class Ffmpeg implements INodeType {
 			let outputExt: string;
 			if (operation === 'convert') {
 				outputExt = this.getNodeParameter('outputFormat', i) as string;
+			} else if (operation === 'audioConvert') {
+				const acFormat = this.getNodeParameter('acOutputFormat', i) as string;
+				outputExt = acFormat || inputExt;
 			} else {
 				// changeBitrate: keep same format
 				outputExt = inputExt;
@@ -483,7 +581,24 @@ export class Ffmpeg implements INodeType {
 				// Build ffmpeg arguments
 				const args = ['-i', inputPath];
 
-				if (operation === 'convert') {
+				if (operation === 'audioConvert') {
+					const acBitrate = this.getNodeParameter('acBitrate', i) as string;
+					const acSampleRate = this.getNodeParameter('acSampleRate', i) as number;
+					const acChannels = this.getNodeParameter('acChannels', i) as number;
+					const acNormalize = this.getNodeParameter('acNormalize', i) as string;
+					if (acBitrate) {
+						args.push('-b:a', acBitrate);
+					}
+					if (acSampleRate) {
+						args.push('-ar', String(acSampleRate));
+					}
+					if (acChannels) {
+						args.push('-ac', String(acChannels));
+					}
+					if (acNormalize) {
+						args.push('-af', acNormalize);
+					}
+				} else if (operation === 'convert') {
 					const options = this.getNodeParameter('options', i, {}) as {
 						bitrate?: string;
 						sampleRate?: number;
