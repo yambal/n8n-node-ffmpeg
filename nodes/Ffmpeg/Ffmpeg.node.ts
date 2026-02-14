@@ -352,12 +352,25 @@ export class Ffmpeg implements INodeType {
 				},
 			},
 			{
+				displayName: 'Outro Duration (seconds)',
+				name: 'outroSeconds',
+				type: 'number',
+				typeOptions: { minValue: 0, numberStepSize: 0.5 },
+				default: 0,
+				description: 'Duration BGM continues at low volume after narration ends, before fade out begins',
+				displayOptions: {
+					show: {
+						operation: ['mixNarrationBgm'],
+					},
+				},
+			},
+			{
 				displayName: 'Fade Out Duration (seconds)',
 				name: 'fadeOutSeconds',
 				type: 'number',
 				typeOptions: { minValue: 0, numberStepSize: 0.5 },
 				default: 3,
-				description: 'Duration for BGM to fade out to silence after narration ends',
+				description: 'Duration for BGM to fade out to silence after outro',
 				displayOptions: {
 					show: {
 						operation: ['mixNarrationBgm'],
@@ -446,6 +459,7 @@ export class Ffmpeg implements INodeType {
 				const introSeconds = this.getNodeParameter('introSeconds', i) as number;
 				const fadeDownSeconds = this.getNodeParameter('fadeDownSeconds', i) as number;
 				const bgmVolume = this.getNodeParameter('bgmVolume', i) as number;
+				const outroSeconds = this.getNodeParameter('outroSeconds', i) as number;
 				const fadeOutSeconds = this.getNodeParameter('fadeOutSeconds', i) as number;
 				const mixOutputFormat = this.getNodeParameter('mixOutputFormat', i) as string;
 				const mixBitrate = this.getNodeParameter('mixBitrate', i) as string;
@@ -489,21 +503,27 @@ export class Ffmpeg implements INodeType {
 					}
 
 					// Calculate timing
-					// fadeIn -> intro (full vol) -> fadeDown -> narration + bgmVol -> fadeOut
+					// fadeIn -> intro (full vol) -> fadeDown -> narration (bgmVol) -> outro (bgmVol) -> fadeOut
 					const fadeInEnd = fadeInSeconds;
 					const introEnd = fadeInEnd + introSeconds;
 					const fadeDownEnd = introEnd + fadeDownSeconds;
 					const narDelay = fadeDownEnd;
 					const narEnd = narDelay + narDuration;
-					const totalDuration = narEnd + fadeOutSeconds;
+					const outroEnd = narEnd + outroSeconds;
+					const totalDuration = outroEnd + fadeOutSeconds;
 					const delayMs = Math.round(narDelay * 1000);
 
-					// Build volume expression for BGM envelope (inside-out)
+					// Build volume expression for BGM envelope (inside-out):
+					// 0 ~ fadeInEnd: fade from 0 to 1.0
+					// fadeInEnd ~ introEnd: full volume (1.0)
+					// introEnd ~ fadeDownEnd: fade from 1.0 to bgmVolume
+					// fadeDownEnd ~ outroEnd: bgmVolume (narration + outro)
+					// outroEnd ~ outroEnd+fadeOutSeconds: fade from bgmVolume to 0
 					let volExpr = '0';
 					if (fadeOutSeconds > 0) {
-						volExpr = `if(lt(t,${narEnd + fadeOutSeconds}),${bgmVolume}*(1-(t-${narEnd})/${fadeOutSeconds}),${volExpr})`;
+						volExpr = `if(lt(t,${outroEnd + fadeOutSeconds}),${bgmVolume}*(1-(t-${outroEnd})/${fadeOutSeconds}),${volExpr})`;
 					}
-					volExpr = `if(lt(t,${narEnd}),${bgmVolume},${volExpr})`;
+					volExpr = `if(lt(t,${outroEnd}),${bgmVolume},${volExpr})`;
 					if (fadeDownSeconds > 0) {
 						volExpr = `if(lt(t,${fadeDownEnd}),1.0-(1.0-${bgmVolume})*(t-${introEnd})/${fadeDownSeconds},${volExpr})`;
 					}
@@ -564,6 +584,7 @@ export class Ffmpeg implements INodeType {
 							introSeconds,
 							fadeDownSeconds,
 							bgmVolume,
+							outroSeconds,
 							fadeOutSeconds,
 							totalDuration,
 							outputFormat: mixOutputFormat,
