@@ -23,6 +23,14 @@ const MIME_TYPES: Record<string, string> = {
 	m4a: 'audio/mp4',
 };
 
+const NORMALIZE_OPTIONS = [
+	{ name: 'Off', value: '' },
+	{ name: 'Podcast (-16 LUFS)', value: 'loudnorm=I=-16:TP=-1.5:LRA=11' },
+	{ name: 'YouTube (-14 LUFS)', value: 'loudnorm=I=-14:TP=-1:LRA=11' },
+	{ name: 'Broadcast (-23 LUFS)', value: 'loudnorm=I=-23:TP=-1:LRA=7' },
+	{ name: 'Custom', value: 'custom' },
+];
+
 export class Ffmpeg implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'FFmpeg',
@@ -228,15 +236,25 @@ export class Ffmpeg implements INodeType {
 				displayName: 'Normalize',
 				name: 'acNormalize',
 				type: 'options',
-				options: [
-					{ name: 'Off', value: '' },
-					{ name: 'EBU R128 Loudness', value: 'loudnorm' },
-				],
+				options: NORMALIZE_OPTIONS,
 				default: '',
 				description: 'Audio loudness normalization',
 				displayOptions: {
 					show: {
 						operation: ['audioConvert'],
+					},
+				},
+			},
+			{
+				displayName: 'Normalize Custom Value',
+				name: 'acNormalizeCustom',
+				type: 'string',
+				default: 'loudnorm=I=-16:TP=-1.5:LRA=11',
+				description: 'Custom loudnorm filter (e.g. loudnorm=I=-16:TP=-1.5:LRA=11)',
+				displayOptions: {
+					show: {
+						operation: ['audioConvert'],
+						acNormalize: ['custom'],
 					},
 				},
 			},
@@ -457,15 +475,25 @@ export class Ffmpeg implements INodeType {
 				displayName: 'Normalize',
 				name: 'mixNormalize',
 				type: 'options',
-				options: [
-					{ name: 'Off', value: '' },
-					{ name: 'EBU R128 Loudness', value: 'loudnorm' },
-				],
+				options: NORMALIZE_OPTIONS,
 				default: '',
 				description: 'Audio loudness normalization on the mixed output',
 				displayOptions: {
 					show: {
 						operation: ['mixNarrationBgm'],
+					},
+				},
+			},
+			{
+				displayName: 'Normalize Custom Value',
+				name: 'mixNormalizeCustom',
+				type: 'string',
+				default: 'loudnorm=I=-16:TP=-1.5:LRA=11',
+				description: 'Custom loudnorm filter (e.g. loudnorm=I=-16:TP=-1.5:LRA=11)',
+				displayOptions: {
+					show: {
+						operation: ['mixNarrationBgm'],
+						mixNormalize: ['custom'],
 					},
 				},
 			},
@@ -638,7 +666,10 @@ export class Ffmpeg implements INodeType {
 				const fadeOutSeconds = this.getNodeParameter('fadeOutSeconds', i) as number;
 				const mixOutputFormat = this.getNodeParameter('mixOutputFormat', i) as string;
 				const mixBitrate = this.getNodeParameter('mixBitrate', i) as string;
-				const mixNormalize = this.getNodeParameter('mixNormalize', i) as string;
+				const mixNormalizeParam = this.getNodeParameter('mixNormalize', i) as string;
+				const mixNormalize = mixNormalizeParam === 'custom'
+					? this.getNodeParameter('mixNormalizeCustom', i) as string
+					: mixNormalizeParam;
 
 				// Get narration binary
 				const narBinaryData = this.helpers.assertBinaryData(i, binaryPropertyName);
@@ -810,7 +841,10 @@ export class Ffmpeg implements INodeType {
 					const acSampleRate = this.getNodeParameter('acSampleRate', i) as number;
 					const acChannels = this.getNodeParameter('acChannels', i) as number;
 					const acEcho = this.getNodeParameter('acEcho', i) as string;
-					const acNormalize = this.getNodeParameter('acNormalize', i) as string;
+					const acNormalizeParam = this.getNodeParameter('acNormalize', i) as string;
+					const acNormalize = acNormalizeParam === 'custom'
+						? this.getNodeParameter('acNormalizeCustom', i) as string
+						: acNormalizeParam;
 					if (acBitrate) {
 						args.push('-b:a', acBitrate);
 					}
