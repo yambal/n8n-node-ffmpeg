@@ -40,6 +40,12 @@ class Ffmpeg {
                     noDataExpression: true,
                     options: [
                         {
+                            name: 'Analyze Audio',
+                            value: 'analyzeAudio',
+                            description: 'Analyze audio volume, loudness, and other properties',
+                            action: 'Analyze audio',
+                        },
+                        {
                             name: 'Audio Convert',
                             value: 'audioConvert',
                             description: 'Convert format, bitrate, sample rate, channels, and normalize',
@@ -72,6 +78,36 @@ class Ffmpeg {
                     type: 'string',
                     default: 'data',
                     description: 'Name of the binary property containing the input audio file',
+                },
+                // Analyze Audio parameters
+                {
+                    displayName: 'Analysis Type',
+                    name: 'analysisType',
+                    type: 'multiOptions',
+                    options: [
+                        {
+                            name: 'Volume Detection',
+                            value: 'volumedetect',
+                            description: 'Detect mean and max volume (dB)',
+                        },
+                        {
+                            name: 'EBU R128 Loudness',
+                            value: 'loudnorm',
+                            description: 'Measure integrated loudness, true peak, and loudness range (LUFS)',
+                        },
+                        {
+                            name: 'Duration & Format',
+                            value: 'probe',
+                            description: 'Get duration, format, codec, sample rate, channels, and bitrate',
+                        },
+                    ],
+                    default: ['volumedetect', 'loudnorm', 'probe'],
+                    description: 'Types of analysis to perform',
+                    displayOptions: {
+                        show: {
+                            operation: ['analyzeAudio'],
+                        },
+                    },
                 },
                 // Audio Convert parameters
                 {
@@ -434,6 +470,11 @@ class Ffmpeg {
                     type: 'string',
                     default: 'data',
                     description: 'Name of the binary property for the output audio file',
+                    displayOptions: {
+                        hide: {
+                            operation: ['analyzeAudio'],
+                        },
+                    },
                 },
             ],
         };
@@ -444,6 +485,136 @@ class Ffmpeg {
         for (let i = 0; i < items.length; i++) {
             const operation = this.getNodeParameter('operation', i);
             const binaryPropertyName = this.getNodeParameter('binaryPropertyName', i);
+            // Handle Analyze Audio
+            if (operation === 'analyzeAudio') {
+                const analysisType = this.getNodeParameter('analysisType', i);
+                const binaryData = this.helpers.assertBinaryData(i, binaryPropertyName);
+                const inputBuffer = await this.helpers.getBinaryDataBuffer(i, binaryPropertyName);
+                const inputExt = getExtensionFromBinary(binaryData);
+                const id = (0, crypto_1.randomUUID)();
+                const inputPath = (0, path_1.join)((0, os_1.tmpdir)(), `ffmpeg_analyze_${id}.${inputExt}`);
+                try {
+                    await (0, promises_1.writeFile)(inputPath, inputBuffer);
+                    const result = {
+                        operation,
+                        fileName: binaryData.fileName || '',
+                        mimeType: binaryData.mimeType,
+                    };
+                    // Duration & Format via ffprobe
+                    if (analysisType.includes('probe')) {
+                        try {
+                            const probeResult = await execFileAsync('ffprobe', [
+                                '-v', 'error',
+                                '-show_entries', 'format=duration,size,bit_rate,format_name:stream=codec_name,sample_rate,channels,channel_layout',
+                                '-of', 'json',
+                                inputPath,
+                            ]);
+                            const probeData = JSON.parse(probeResult.stdout);
+                            const format = probeData.format || {};
+                            const stream = (probeData.streams && probeData.streams[0]) || {};
+                            result.probe = {
+                                duration: format.duration ? parseFloat(format.duration) : null,
+                                fileSize: format.size ? parseInt(format.size, 10) : null,
+                                bitRate: format.bit_rate ? parseInt(format.bit_rate, 10) : null,
+                                formatName: format.format_name || null,
+                                codec: stream.codec_name || null,
+                                sampleRate: stream.sample_rate ? parseInt(stream.sample_rate, 10) : null,
+                                channels: stream.channels || null,
+                                channelLayout: stream.channel_layout || null,
+                            };
+                        }
+                        catch (err) {
+                            result.probe = { error: err.stderr || err.message };
+                        }
+                    }
+                    // Volume Detection
+                    if (analysisType.includes('volumedetect')) {
+                        try {
+                            const volResult = await execFileAsync('ffmpeg', [
+                                '-i', inputPath,
+                                '-af', 'volumedetect',
+                                '-f', 'null',
+                                '-',
+                            ], { timeout: 120000 });
+                            const stderr = volResult.stderr;
+                            const meanMatch = stderr.match(/mean_volume:\s*([-\d.]+)\s*dB/);
+                            const maxMatch = stderr.match(/max_volume:\s*([-\d.]+)\s*dB/);
+                            result.volume = {
+                                meanVolume: meanMatch ? parseFloat(meanMatch[1]) : null,
+                                maxVolume: maxMatch ? parseFloat(maxMatch[1]) : null,
+                            };
+                        }
+                        catch (err) {
+                            // ffmpeg writes volumedetect output to stderr even on success
+                            const stderr = err.stderr || '';
+                            const meanMatch = stderr.match(/mean_volume:\s*([-\d.]+)\s*dB/);
+                            const maxMatch = stderr.match(/max_volume:\s*([-\d.]+)\s*dB/);
+                            if (meanMatch || maxMatch) {
+                                result.volume = {
+                                    meanVolume: meanMatch ? parseFloat(meanMatch[1]) : null,
+                                    maxVolume: maxMatch ? parseFloat(maxMatch[1]) : null,
+                                };
+                            }
+                            else {
+                                result.volume = { error: err.message };
+                            }
+                        }
+                    }
+                    // EBU R128 Loudness
+                    if (analysisType.includes('loudnorm')) {
+                        try {
+                            const loudResult = await execFileAsync('ffmpeg', [
+                                '-i', inputPath,
+                                '-af', 'loudnorm=print_format=json',
+                                '-f', 'null',
+                                '-',
+                            ], { timeout: 120000 });
+                            const stderr = loudResult.stderr;
+                            const jsonMatch = stderr.match(/\{[\s\S]*"input_i"[\s\S]*\}/);
+                            if (jsonMatch) {
+                                const loudData = JSON.parse(jsonMatch[0]);
+                                result.loudness = {
+                                    inputI: parseFloat(loudData.input_i),
+                                    inputTp: parseFloat(loudData.input_tp),
+                                    inputLra: parseFloat(loudData.input_lra),
+                                    inputThresh: parseFloat(loudData.input_thresh),
+                                    targetOffset: parseFloat(loudData.target_offset),
+                                };
+                            }
+                        }
+                        catch (err) {
+                            const stderr = err.stderr || '';
+                            const jsonMatch = stderr.match(/\{[\s\S]*"input_i"[\s\S]*\}/);
+                            if (jsonMatch) {
+                                try {
+                                    const loudData = JSON.parse(jsonMatch[0]);
+                                    result.loudness = {
+                                        inputI: parseFloat(loudData.input_i),
+                                        inputTp: parseFloat(loudData.input_tp),
+                                        inputLra: parseFloat(loudData.input_lra),
+                                        inputThresh: parseFloat(loudData.input_thresh),
+                                        targetOffset: parseFloat(loudData.target_offset),
+                                    };
+                                }
+                                catch {
+                                    result.loudness = { error: err.message };
+                                }
+                            }
+                            else {
+                                result.loudness = { error: err.message };
+                            }
+                        }
+                    }
+                    returnData.push({
+                        json: result,
+                        pairedItem: { item: i },
+                    });
+                }
+                finally {
+                    await (0, promises_1.unlink)(inputPath).catch(() => { });
+                }
+                continue;
+            }
             const outputBinaryPropertyName = this.getNodeParameter('outputBinaryPropertyName', i);
             // Handle Mix Narration with BGM separately
             if (operation === 'mixNarrationBgm') {
@@ -496,12 +667,7 @@ class Ffmpeg {
                     const outroEnd = narEnd + outroSeconds;
                     const totalDuration = outroEnd + fadeOutSeconds;
                     const delayMs = Math.round(narDelay * 1000);
-                    // Build volume expression for BGM envelope (inside-out):
-                    // 0 ~ fadeInEnd: fade from 0 to 1.0
-                    // fadeInEnd ~ introEnd: full volume (1.0)
-                    // introEnd ~ fadeDownEnd: fade from 1.0 to bgmVolume
-                    // fadeDownEnd ~ outroEnd: bgmVolume (narration + outro)
-                    // outroEnd ~ outroEnd+fadeOutSeconds: fade from bgmVolume to 0
+                    // Build volume expression for BGM envelope (inside-out)
                     let volExpr = '0';
                     if (fadeOutSeconds > 0) {
                         volExpr = `if(lt(t,${outroEnd + fadeOutSeconds}),${bgmVolume}*(1-(t-${outroEnd})/${fadeOutSeconds}),${volExpr})`;
