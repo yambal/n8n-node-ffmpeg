@@ -258,6 +258,61 @@ export class Ffmpeg implements INodeType {
 					},
 				},
 			},
+			{
+				displayName: 'Silence Trim',
+				name: 'acSilenceTrim',
+				type: 'options',
+				options: [
+					{ name: 'Off', value: '' },
+					{ name: 'On', value: 'on' },
+				],
+				default: '',
+				description: 'Trim silence from the beginning and end of audio',
+				displayOptions: {
+					show: {
+						operation: ['audioConvert'],
+					},
+				},
+			},
+			{
+				displayName: 'Silence Threshold',
+				name: 'acSilenceThreshold',
+				type: 'options',
+				options: [
+					{ name: '-60 dB', value: '-60dB' },
+					{ name: '-50 dB', value: '-50dB' },
+					{ name: '-40 dB', value: '-40dB' },
+					{ name: '-30 dB', value: '-30dB' },
+				],
+				default: '-50dB',
+				description: 'Volume threshold below which audio is considered silence',
+				displayOptions: {
+					show: {
+						operation: ['audioConvert'],
+						acSilenceTrim: ['on'],
+					},
+				},
+			},
+			{
+				displayName: 'Remaining Silence',
+				name: 'acSilenceRemain',
+				type: 'options',
+				options: [
+					{ name: '0 s', value: '0' },
+					{ name: '0.1 s', value: '0.1' },
+					{ name: '0.3 s', value: '0.3' },
+					{ name: '0.5 s', value: '0.5' },
+					{ name: '1.0 s', value: '1.0' },
+				],
+				default: '0',
+				description: 'Duration of silence to keep at the beginning and end after trimming',
+				displayOptions: {
+					show: {
+						operation: ['audioConvert'],
+						acSilenceTrim: ['on'],
+					},
+				},
+			},
 			// Convert parameters
 			{
 				displayName: 'Output Format',
@@ -856,6 +911,13 @@ export class Ffmpeg implements INodeType {
 					}
 					// Build audio filter chain
 					const filters: string[] = [];
+					const acSilenceTrim = this.getNodeParameter('acSilenceTrim', i) as string;
+					if (acSilenceTrim === 'on') {
+						const acSilenceThreshold = this.getNodeParameter('acSilenceThreshold', i) as string;
+						const acSilenceRemain = this.getNodeParameter('acSilenceRemain', i) as string;
+						const silenceFilter = `silenceremove=start_periods=1:start_silence=${acSilenceRemain}:start_threshold=${acSilenceThreshold}`;
+						filters.push(silenceFilter, 'areverse', silenceFilter, 'areverse');
+					}
 					if (acEcho) {
 						const echoValue = acEcho === 'custom'
 							? this.getNodeParameter('acEchoCustom', i) as string

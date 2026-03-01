@@ -1,6 +1,6 @@
 {
   "name": "@jnymmt/n8n-nodes-ffmpeg",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "n8n community node for audio conversion using FFmpeg",
   "keywords": [
     "n8n-community-node-package"

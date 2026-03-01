@@ -17,6 +17,13 @@ const MIME_TYPES = {
     aac: 'audio/aac',
     m4a: 'audio/mp4',
 };
+const NORMALIZE_OPTIONS = [
+    { name: 'Off', value: '' },
+    { name: 'Podcast (-16 LUFS)', value: 'loudnorm=I=-16:TP=-1.5:LRA=11' },
+    { name: 'YouTube (-14 LUFS)', value: 'loudnorm=I=-14:TP=-1:LRA=11' },
+    { name: 'Broadcast (-23 LUFS)', value: 'loudnorm=I=-23:TP=-1:LRA=7' },
+    { name: 'Custom', value: 'custom' },
+];
 class Ffmpeg {
     constructor() {
         this.description = {
@@ -223,15 +230,80 @@ class Ffmpeg {
                     displayName: 'Normalize',
                     name: 'acNormalize',
                     type: 'options',
-                    options: [
-                        { name: 'Off', value: '' },
-                        { name: 'EBU R128 Loudness', value: 'loudnorm' },
-                    ],
+                    options: NORMALIZE_OPTIONS,
                     default: '',
                     description: 'Audio loudness normalization',
                     displayOptions: {
                         show: {
                             operation: ['audioConvert'],
+                        },
+                    },
+                },
+                {
+                    displayName: 'Normalize Custom Value',
+                    name: 'acNormalizeCustom',
+                    type: 'string',
+                    default: 'loudnorm=I=-16:TP=-1.5:LRA=11',
+                    description: 'Custom loudnorm filter (e.g. loudnorm=I=-16:TP=-1.5:LRA=11)',
+                    displayOptions: {
+                        show: {
+                            operation: ['audioConvert'],
+                            acNormalize: ['custom'],
+                        },
+                    },
+                },
+                {
+                    displayName: 'Silence Trim',
+                    name: 'acSilenceTrim',
+                    type: 'options',
+                    options: [
+                        { name: 'Off', value: '' },
+                        { name: 'On', value: 'on' },
+                    ],
+                    default: '',
+                    description: 'Trim silence from the beginning and end of audio',
+                    displayOptions: {
+                        show: {
+                            operation: ['audioConvert'],
+                        },
+                    },
+                },
+                {
+                    displayName: 'Silence Threshold',
+                    name: 'acSilenceThreshold',
+                    type: 'options',
+                    options: [
+                        { name: '-60 dB', value: '-60dB' },
+                        { name: '-50 dB', value: '-50dB' },
+                        { name: '-40 dB', value: '-40dB' },
+                        { name: '-30 dB', value: '-30dB' },
+                    ],
+                    default: '-50dB',
+                    description: 'Volume threshold below which audio is considered silence',
+                    displayOptions: {
+                        show: {
+                            operation: ['audioConvert'],
+                            acSilenceTrim: ['on'],
+                        },
+                    },
+                },
+                {
+                    displayName: 'Remaining Silence',
+                    name: 'acSilenceRemain',
+                    type: 'options',
+                    options: [
+                        { name: '0 s', value: '0' },
+                        { name: '0.1 s', value: '0.1' },
+                        { name: '0.3 s', value: '0.3' },
+                        { name: '0.5 s', value: '0.5' },
+                        { name: '1.0 s', value: '1.0' },
+                    ],
+                    default: '0',
+                    description: 'Duration of silence to keep at the beginning and end after trimming',
+                    displayOptions: {
+                        show: {
+                            operation: ['audioConvert'],
+                            acSilenceTrim: ['on'],
                         },
                     },
                 },
@@ -452,15 +524,25 @@ class Ffmpeg {
                     displayName: 'Normalize',
                     name: 'mixNormalize',
                     type: 'options',
-                    options: [
-                        { name: 'Off', value: '' },
-                        { name: 'EBU R128 Loudness', value: 'loudnorm' },
-                    ],
+                    options: NORMALIZE_OPTIONS,
                     default: '',
                     description: 'Audio loudness normalization on the mixed output',
                     displayOptions: {
                         show: {
                             operation: ['mixNarrationBgm'],
+                        },
+                    },
+                },
+                {
+                    displayName: 'Normalize Custom Value',
+                    name: 'mixNormalizeCustom',
+                    type: 'string',
+                    default: 'loudnorm=I=-16:TP=-1.5:LRA=11',
+                    description: 'Custom loudnorm filter (e.g. loudnorm=I=-16:TP=-1.5:LRA=11)',
+                    displayOptions: {
+                        show: {
+                            operation: ['mixNarrationBgm'],
+                            mixNormalize: ['custom'],
                         },
                     },
                 },
@@ -627,7 +709,10 @@ class Ffmpeg {
                 const fadeOutSeconds = this.getNodeParameter('fadeOutSeconds', i);
                 const mixOutputFormat = this.getNodeParameter('mixOutputFormat', i);
                 const mixBitrate = this.getNodeParameter('mixBitrate', i);
-                const mixNormalize = this.getNodeParameter('mixNormalize', i);
+                const mixNormalizeParam = this.getNodeParameter('mixNormalize', i);
+                const mixNormalize = mixNormalizeParam === 'custom'
+                    ? this.getNodeParameter('mixNormalizeCustom', i)
+                    : mixNormalizeParam;
                 // Get narration binary
                 const narBinaryData = this.helpers.assertBinaryData(i, binaryPropertyName);
                 const narBuffer = await this.helpers.getBinaryDataBuffer(i, binaryPropertyName);
@@ -767,7 +852,10 @@ class Ffmpeg {
                     const acSampleRate = this.getNodeParameter('acSampleRate', i);
                     const acChannels = this.getNodeParameter('acChannels', i);
                     const acEcho = this.getNodeParameter('acEcho', i);
-                    const acNormalize = this.getNodeParameter('acNormalize', i);
+                    const acNormalizeParam = this.getNodeParameter('acNormalize', i);
+                    const acNormalize = acNormalizeParam === 'custom'
+                        ? this.getNodeParameter('acNormalizeCustom', i)
+                        : acNormalizeParam;
                     if (acBitrate) {
                         args.push('-b:a', acBitrate);
                     }
@@ -779,6 +867,13 @@ class Ffmpeg {
                     }
                     // Build audio filter chain
                     const filters = [];
+                    const acSilenceTrim = this.getNodeParameter('acSilenceTrim', i);
+                    if (acSilenceTrim === 'on') {
+                        const acSilenceThreshold = this.getNodeParameter('acSilenceThreshold', i);
+                        const acSilenceRemain = this.getNodeParameter('acSilenceRemain', i);
+                        const silenceFilter = `silenceremove=start_periods=1:start_silence=${acSilenceRemain}:start_threshold=${acSilenceThreshold}`;
+                        filters.push(silenceFilter, 'areverse', silenceFilter, 'areverse');
+                    }
                     if (acEcho) {
                         const echoValue = acEcho === 'custom'
                             ? this.getNodeParameter('acEchoCustom', i)
